@@ -236,11 +236,14 @@ def build_story(styles):
     story.append(Paragraph("Abstract", s["h1"]))
     story.append(Paragraph(
         "Convolutional Neural Networks (CNNs) are the backbone of modern computer vision, "
-        "achieving state-of-the-art results on image classification, detection, segmentation, "
-        "and beyond. This survey covers the core CNN data-flow, provides a minimal PyTorch "
-        "implementation, compares landmark architectures by Top-1 accuracy, parameter count, "
-        "and FLOPs, includes a scatter-plot visualisation of the accuracy–efficiency trade-off, "
-        "and discusses current research directions.",
+        "achieving state-of-the-art results on image classification, object detection, "
+        "semantic segmentation, and beyond. This survey traces the evolution of CNNs from "
+        "LeNet (1998) to EfficientNet (2019), covering: (i) the core Conv–Pool–FC data-flow "
+        "with an annotated architecture diagram; (ii) a minimal PyTorch implementation; "
+        "(iii) a quantitative benchmark comparing seven landmark architectures by Top-1 "
+        "accuracy, parameter count, and FLOPs; (iv) an accuracy–efficiency scatter plot; "
+        "and (v) emerging research directions including CNN–Transformer hybrids, lightweight "
+        "edge-deployment models, and self-supervised pre-training.",
         s["body"],
     ))
 
@@ -326,10 +329,10 @@ def build_story(styles):
     story.append(Paragraph("6. Recent Trends", s["h1"]))
     story.append(Paragraph(
         "(a) <b>Neural Architecture Search (NAS)</b> automates topology design for given hardware "
-        "budgets (EfficientNet [6]). "
+        "budgets (EfficientNet [7]). "
         "(b) <b>Attention mechanisms</b> augment CNNs with channel/spatial attention (CBAM, "
         "Non-local Networks). "
-        "(c) <b>Vision Transformers (ViT)</b> [7] replace convolutions with patch-based "
+        "(c) <b>Vision Transformers (ViT)</b> [8] replace convolutions with patch-based "
         "self-attention, competitive on large-scale data. "
         "(d) <b>Efficient inference</b> via quantisation, pruning, and knowledge distillation "
         "targets edge deployment.",
@@ -339,10 +342,18 @@ def build_story(styles):
     # ---------- 7. Conclusion ----------
     story.append(Paragraph("7. Conclusion", s["h1"]))
     story.append(Paragraph(
-        "CNNs have transformed computer vision, evolving from LeNet's digit recogniser to "
-        "architectures achieving superhuman performance. Hybrid CNN–Transformer models and "
-        "self-supervised pre-training continue to push accuracy–efficiency frontiers, ensuring "
-        "CNNs remain central to AI progress.",
+        "CNNs have transformed computer vision over three decades, evolving from LeNet's "
+        "handwritten-digit recogniser to architectures achieving superhuman performance on "
+        "ImageNet. Key contributions—shared-weight convolutions, residual connections, and "
+        "compound scaling—have steadily improved the accuracy–efficiency frontier. "
+        "Looking ahead, three directions are most promising: "
+        "(1) <b>CNN–Transformer hybrids</b> (e.g., ConvNeXt, EfficientViT) that blend "
+        "local inductive biases with global attention for improved generalisation; "
+        "(2) <b>Lightweight and hardware-aware networks</b> combining NAS, quantisation, and "
+        "pruning for real-time inference on edge devices; and "
+        "(3) <b>Self-supervised and multimodal pre-training</b> (CLIP, MAE) that leverages "
+        "unlabelled data at scale, reducing reliance on annotated datasets. "
+        "CNNs thus remain—whether standalone or as backbone components—central to AI progress.",
         s["body"],
     ))
 
