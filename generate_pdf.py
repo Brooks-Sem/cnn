@@ -1,15 +1,20 @@
 """
 Expanded CNN Survey PDF generator using ReportLab.
-Adds: architecture diagram, PyTorch code example, classic network comparison table,
-and a full reference list (7 key papers).
+Adds: architecture diagram, PyTorch code example, classic network comparison table
+with Top-1 accuracy / FLOPs, accuracy-vs-model-size scatter plot, benchmark script
+reference, and a full reference list (APA format).
 """
+import io
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch, mm
 from reportlab.lib import colors
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    HRFlowable, Preformatted
+    HRFlowable, Preformatted, Image as RLImage,
 )
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 
@@ -142,40 +147,76 @@ logits = model(x)                 # shape: (4, 10)
 print(logits.shape)               # -> torch.Size([4, 10])"""
 
 
-def classic_table():
-    header = ["Network", "Year", "Depth", "Params", "Top-5 Err.", "Key Innovation"]
-    data = [
-        header,
-        ["LeNet-5",    "1998", "7",   "60 K",   "—",      "First practical CNN; tanh activations"],
-        ["AlexNet",    "2012", "8",   "60 M",   "15.3%",  "ReLU, Dropout, GPU training"],
-        ["VGG-16",     "2014", "16",  "138 M",  "7.3%",   "Deep stacks of 3×3 convolutions"],
-        ["GoogLeNet",  "2014", "22",  "6.8 M",  "6.7%",   "Inception module + 1×1 bottleneck"],
-        ["ResNet-50",  "2016", "50",  "25 M",   "3.57%",  "Residual (skip) connections"],
-        ["MobileNetV2","2018", "53",  "3.4 M",  "~5%",    "Depthwise separable convolutions"],
-        ["EfficientB0","2019", "—",   "5.3 M",  "2.9%",   "Compound depth/width/res scaling"],
-    ]
+# ---------- Performance data (ImageNet val, reported values) ----------
+PERF_DATA = [
+    # name,         top1,  params_M, gflops,  innovation
+    ("LeNet-5",     None,  0.06,     0.0003,  "First practical CNN; tanh activations"),
+    ("AlexNet",     63.3,  61.0,     0.72,    "ReLU, Dropout, GPU training"),
+    ("GoogLeNet",   69.8,  6.8,      1.50,    "Inception module + 1×1 bottleneck"),
+    ("VGG-16",      73.4,  138.0,    15.50,   "Deep stacks of 3×3 convolutions"),
+    ("ResNet-50",   76.1,  25.0,     4.10,    "Residual (skip) connections"),
+    ("MobileNetV2", 72.0,  3.4,      0.30,    "Depthwise separable + inverted residuals"),
+    ("EfficientB0", 77.1,  5.3,      0.39,    "Compound depth/width/resolution scaling"),
+]
+
+
+def performance_table():
+    header = ["Network", "Year", "Top-1 (%)", "Params (M)", "GFLOPs", "Key Innovation"]
+    years  = {"LeNet-5": "1998", "AlexNet": "2012", "GoogLeNet": "2014",
+              "VGG-16": "2014", "ResNet-50": "2016",
+              "MobileNetV2": "2018", "EfficientB0": "2019"}
+    data = [header]
+    for name, top1, params, gflops, innov in PERF_DATA:
+        top1_s = f"{top1:.1f}" if top1 is not None else "—"
+        data.append([name, years[name], top1_s, f"{params:.1f}", f"{gflops:.2f}", innov])
 
     available = PAGE_W - 2 * MARGIN
-    col_widths = [58, 26, 28, 34, 42, None]
+    col_widths = [58, 26, 36, 40, 38, None]
     fixed = sum(w for w in col_widths if w is not None)
     col_widths[-1] = available - fixed
 
     style = TableStyle([
-        ("BACKGROUND",      (0, 0), (-1, 0),  colors.HexColor("#1a1a8c")),
-        ("TEXTCOLOR",       (0, 0), (-1, 0),  colors.white),
-        ("FONTNAME",        (0, 0), (-1, 0),  "Helvetica-Bold"),
-        ("FONTSIZE",        (0, 0), (-1, -1), 7.5),
-        ("ROWBACKGROUNDS",  (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef0f8")]),
-        ("GRID",            (0, 0), (-1, -1), 0.3, colors.HexColor("#aaaaaa")),
-        ("ALIGN",           (1, 0), (4, -1),  "CENTER"),
-        ("VALIGN",          (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING",      (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING",   (0, 0), (-1, -1), 3),
-        ("LEFTPADDING",     (0, 0), (-1, -1), 4),
+        ("BACKGROUND",     (0, 0), (-1, 0),  colors.HexColor("#1a1a8c")),
+        ("TEXTCOLOR",      (0, 0), (-1, 0),  colors.white),
+        ("FONTNAME",       (0, 0), (-1, 0),  "Helvetica-Bold"),
+        ("FONTSIZE",       (0, 0), (-1, -1), 7.5),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef0f8")]),
+        ("GRID",           (0, 0), (-1, -1), 0.3, colors.HexColor("#aaaaaa")),
+        ("ALIGN",          (1, 0), (4, -1),  "CENTER"),
+        ("VALIGN",         (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",     (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING",  (0, 0), (-1, -1), 3),
+        ("LEFTPADDING",    (0, 0), (-1, -1), 4),
     ])
     t = Table(data, colWidths=col_widths)
     t.setStyle(style)
     return t
+
+
+def scatter_plot_image(width_pts: float, height_pts: float) -> RLImage:
+    """Return a ReportLab Image of accuracy-vs-model-size scatter plot."""
+    fig, ax = plt.subplots(figsize=(width_pts / 72, height_pts / 72), dpi=120)
+
+    for name, top1, params, gflops, _ in PERF_DATA:
+        if top1 is None:
+            continue
+        ax.scatter(params, top1, s=gflops * 20 + 30, zorder=3,
+                   color="#1a1a8c", alpha=0.75, edgecolors="white", linewidth=0.5)
+        ax.annotate(name, (params, top1),
+                    textcoords="offset points", xytext=(6, 2), fontsize=7)
+
+    ax.set_xlabel("Parameters (M)", fontsize=8)
+    ax.set_ylabel("Top-1 Accuracy (%) on ImageNet", fontsize=8)
+    ax.set_title("Accuracy vs. Model Size  (bubble area ∝ GFLOPs)", fontsize=8.5)
+    ax.grid(True, linestyle="--", linewidth=0.4, alpha=0.6)
+    ax.tick_params(labelsize=7)
+    fig.tight_layout(pad=0.5)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120)
+    plt.close(fig)
+    buf.seek(0)
+    return RLImage(buf, width=width_pts, height=height_pts)
 
 
 def build_story(styles):
@@ -185,7 +226,7 @@ def build_story(styles):
     # ---------- Header ----------
     story.append(Paragraph("Convolutional Neural Networks: A Survey", s["title"]))
     story.append(Paragraph(
-        "Architecture, Code Examples, Classic Networks, and Recent Trends  ·  March 2026",
+        "Architecture, Code Examples, Performance Benchmarks, and Recent Trends  ·  March 2026",
         s["subtitle"],
     ))
     story.append(HRFlowable(width="100%", thickness=1,
@@ -196,9 +237,10 @@ def build_story(styles):
     story.append(Paragraph(
         "Convolutional Neural Networks (CNNs) are the backbone of modern computer vision, "
         "achieving state-of-the-art results on image classification, detection, segmentation, "
-        "and beyond. This survey covers the core CNN data-flow (illustrated with a diagram), "
-        "provides a minimal PyTorch implementation, compares landmark architectures, and "
-        "discusses current research directions.",
+        "and beyond. This survey covers the core CNN data-flow, provides a minimal PyTorch "
+        "implementation, compares landmark architectures by Top-1 accuracy, parameter count, "
+        "and FLOPs, includes a scatter-plot visualisation of the accuracy–efficiency trade-off, "
+        "and discusses current research directions.",
         s["body"],
     ))
 
@@ -245,22 +287,43 @@ def build_story(styles):
         s["body"],
     ))
 
-    # ---------- 4. Classic Networks ----------
-    story.append(Paragraph("4. Classic Network Comparison", s["h1"]))
+    # ---------- 4. Performance Comparison ----------
+    story.append(Paragraph("4. Performance Benchmark: Classic CNN Architectures", s["h1"]))
     story.append(Paragraph(
-        "Table 1 traces landmark CNN milestones from LeNet-5 to EfficientNet, showing the trend "
-        "toward deeper networks, residual connections, and mobile-friendly architectures.",
+        "Table 1 compares landmark architectures by ImageNet Top-1 accuracy (single-crop), "
+        "number of parameters, and multiply-accumulate operations (GFLOPs at 224×224 input). "
+        "The companion <i>benchmark.py</i> script measures per-sample CPU/GPU latency "
+        "using PyTorch <tt>torchvision</tt> models.",
         s["body"],
     ))
-    story.append(classic_table())
+    story.append(performance_table())
     story.append(Spacer(1, 3))
     story.append(Paragraph(
-        "Table 1. Landmark CNN architectures. Top-5 error on ImageNet ILSVRC (where reported).",
+        "Table 1. Landmark CNN architectures on ImageNet. Top-1 accuracy from published papers; "
+        "FLOPs computed for a single 224×224 image.",
         s["caption"],
     ))
 
-    # ---------- 5. Recent Trends ----------
-    story.append(Paragraph("5. Recent Trends", s["h1"]))
+    # ---------- 5. Scatter Plot ----------
+    story.append(Paragraph("5. Accuracy vs. Model Size", s["h1"]))
+    story.append(Paragraph(
+        "Figure 2 visualises the accuracy–efficiency trade-off. "
+        "Bubble area is proportional to GFLOPs. "
+        "MobileNetV2 and EfficientNet-B0 achieve competitive accuracy "
+        "at a fraction of VGG-16's parameter count.",
+        s["body"],
+    ))
+    plot_w = PAGE_W - 2 * MARGIN
+    plot_h = plot_w * 0.48
+    story.append(scatter_plot_image(plot_w, plot_h))
+    story.append(Paragraph(
+        "Figure 2. Top-1 ImageNet accuracy vs. number of parameters (bubble area ∝ GFLOPs). "
+        "LeNet-5 omitted (no ImageNet baseline).",
+        s["caption"],
+    ))
+
+    # ---------- 6. Recent Trends ----------
+    story.append(Paragraph("6. Recent Trends", s["h1"]))
     story.append(Paragraph(
         "(a) <b>Neural Architecture Search (NAS)</b> automates topology design for given hardware "
         "budgets (EfficientNet [6]). "
@@ -273,8 +336,8 @@ def build_story(styles):
         s["body"],
     ))
 
-    # ---------- 6. Conclusion ----------
-    story.append(Paragraph("6. Conclusion", s["h1"]))
+    # ---------- 7. Conclusion ----------
+    story.append(Paragraph("7. Conclusion", s["h1"]))
     story.append(Paragraph(
         "CNNs have transformed computer vision, evolving from LeNet's digit recogniser to "
         "architectures achieving superhuman performance. Hybrid CNN–Transformer models and "
@@ -283,24 +346,46 @@ def build_story(styles):
         s["body"],
     ))
 
-    # ---------- References ----------
+    # ---------- References (APA format) ----------
     story.append(HRFlowable(width="100%", thickness=0.5,
                              color=colors.grey, spaceBefore=5, spaceAfter=3))
     story.append(Paragraph("References", s["h1"]))
     refs = [
-        "[1] Krizhevsky, A., Sutskever, I., & Hinton, G. E. (2012). ImageNet Classification with "
-        "Deep Convolutional Neural Networks. <i>NeurIPS</i>, 25.",
-        "[2] LeCun, Y., Bottou, L., Bengio, Y., & Haffner, P. (1998). Gradient-based learning "
-        "applied to document recognition. <i>Proc. IEEE</i>, 86(11), 2278–2324.",
-        "[3] Simonyan, K., & Zisserman, A. (2014). Very Deep Convolutional Networks for "
-        "Large-Scale Image Recognition. <i>arXiv:1409.1556</i>.",
-        "[4] He, K., Zhang, X., Ren, S., & Sun, J. (2016). Deep Residual Learning for Image "
-        "Recognition. <i>CVPR</i>, 770–778.",
-        "[5] Szegedy, C., et al. (2015). Going Deeper with Convolutions. <i>CVPR</i>, 1–9.",
-        "[6] Tan, M., & Le, Q. V. (2019). EfficientNet: Rethinking Model Scaling for CNNs. "
-        "<i>ICML</i>, 6105–6114.",
-        "[7] Dosovitskiy, A., et al. (2020). An Image is Worth 16×16 Words: Transformers for "
-        "Image Recognition at Scale. <i>arXiv:2010.11929</i>.",
+        "[1] Krizhevsky, A., Sutskever, I., &amp; Hinton, G. E. (2012). ImageNet classification with "
+        "deep convolutional neural networks. <i>Advances in Neural Information Processing Systems</i>, "
+        "<i>25</i>, 1097–1105.",
+
+        "[2] LeCun, Y., Bottou, L., Bengio, Y., &amp; Haffner, P. (1998). Gradient-based learning "
+        "applied to document recognition. <i>Proceedings of the IEEE</i>, <i>86</i>(11), 2278–2324. "
+        "https://doi.org/10.1109/5.726791",
+
+        "[3] Simonyan, K., &amp; Zisserman, A. (2015). Very deep convolutional networks for "
+        "large-scale image recognition. In <i>Proceedings of the International Conference on "
+        "Learning Representations (ICLR)</i>. https://arxiv.org/abs/1409.1556",
+
+        "[4] He, K., Zhang, X., Ren, S., &amp; Sun, J. (2016). Deep residual learning for image "
+        "recognition. In <i>Proceedings of the IEEE Conference on Computer Vision and Pattern "
+        "Recognition (CVPR)</i> (pp. 770–778). https://doi.org/10.1109/CVPR.2016.90",
+
+        "[5] Szegedy, C., Liu, W., Jia, Y., Sermanet, P., Reed, S., Anguelov, D., Erhan, D., "
+        "Vanhoucke, V., &amp; Rabinovich, A. (2015). Going deeper with convolutions. In "
+        "<i>Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition "
+        "(CVPR)</i> (pp. 1–9). https://doi.org/10.1109/CVPR.2015.7298594",
+
+        "[6] Sandler, M., Howard, A., Zhu, M., Zhmoginov, A., &amp; Chen, L.-C. (2018). "
+        "MobileNetV2: Inverted residuals and linear bottlenecks. In <i>Proceedings of the IEEE "
+        "Conference on Computer Vision and Pattern Recognition (CVPR)</i> (pp. 4510–4520). "
+        "https://doi.org/10.1109/CVPR.2018.00474",
+
+        "[7] Tan, M., &amp; Le, Q. V. (2019). EfficientNet: Rethinking model scaling for "
+        "convolutional neural networks. In <i>Proceedings of the 36th International Conference "
+        "on Machine Learning (ICML)</i> (pp. 6105–6114). https://arxiv.org/abs/1905.11946",
+
+        "[8] Dosovitskiy, A., Beyer, L., Kolesnikov, A., Weissenborn, D., Zhai, X., Unterthiner, "
+        "T., Dehghani, M., Minderer, M., Heigold, G., Gelly, S., Uszkoreit, J., &amp; Houlsby, N. "
+        "(2021). An image is worth 16×16 words: Transformers for image recognition at scale. In "
+        "<i>Proceedings of the International Conference on Learning Representations (ICLR)</i>. "
+        "https://arxiv.org/abs/2010.11929",
     ]
     for r in refs:
         story.append(Paragraph(r, s["ref"]))
