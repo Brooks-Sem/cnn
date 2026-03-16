@@ -1,164 +1,328 @@
-from reportlab.lib.pagesizes import letter
+"""
+Expanded CNN Survey PDF generator using ReportLab.
+Adds: architecture diagram, PyTorch code example, classic network comparison table,
+and a full reference list (7 key papers).
+"""
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER, TA_LEFT
+from reportlab.lib.units import inch, mm
 from reportlab.lib import colors
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    HRFlowable, Preformatted
+)
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 
-def build_pdf(filename):
-    doc = SimpleDocTemplate(
-        filename,
-        pagesize=letter,
-        leftMargin=1*inch,
-        rightMargin=1*inch,
-        topMargin=1*inch,
-        bottomMargin=1*inch,
-    )
+PAGE_W, PAGE_H = A4
+MARGIN = 18 * mm
 
+
+def build_styles():
     styles = getSampleStyleSheet()
-
-    title_style = ParagraphStyle(
-        'Title',
-        parent=styles['Normal'],
-        fontSize=14,
-        leading=18,
+    title = ParagraphStyle(
+        "SurveyTitle",
+        parent=styles["Normal"],
+        fontSize=15,
+        leading=19,
+        spaceAfter=3,
         alignment=TA_CENTER,
-        spaceAfter=4,
-        fontName='Helvetica-Bold',
+        fontName="Helvetica-Bold",
     )
-    author_style = ParagraphStyle(
-        'Author',
-        parent=styles['Normal'],
-        fontSize=10,
-        leading=14,
+    subtitle = ParagraphStyle(
+        "Subtitle",
+        parent=styles["Normal"],
+        fontSize=8.5,
+        leading=11,
+        spaceAfter=6,
         alignment=TA_CENTER,
-        spaceAfter=10,
+        textColor=colors.HexColor("#555555"),
     )
-    section_style = ParagraphStyle(
-        'Section',
-        parent=styles['Normal'],
-        fontSize=11,
-        leading=14,
-        spaceBefore=8,
+    h1 = ParagraphStyle(
+        "H1",
+        parent=styles["Normal"],
+        fontSize=10.5,
+        leading=13,
+        spaceBefore=7,
+        spaceAfter=3,
+        fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#1a1a8c"),
+    )
+    body = ParagraphStyle(
+        "Body",
+        parent=styles["Normal"],
+        fontSize=8.5,
+        leading=12,
         spaceAfter=4,
-        fontName='Helvetica-Bold',
-    )
-    body_style = ParagraphStyle(
-        'Body',
-        parent=styles['Normal'],
-        fontSize=10,
-        leading=14,
         alignment=TA_JUSTIFY,
-        spaceAfter=4,
     )
+    code = ParagraphStyle(
+        "Code",
+        parent=styles["Code"],
+        fontSize=7,
+        leading=10,
+        fontName="Courier",
+        backColor=colors.HexColor("#f5f5f5"),
+        leftIndent=6,
+        rightIndent=6,
+        spaceBefore=3,
+        spaceAfter=3,
+    )
+    caption = ParagraphStyle(
+        "Caption",
+        parent=styles["Normal"],
+        fontSize=7.5,
+        leading=10,
+        spaceAfter=5,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#555555"),
+    )
+    ref = ParagraphStyle(
+        "Ref",
+        parent=styles["Normal"],
+        fontSize=7.5,
+        leading=11,
+        leftIndent=12,
+        firstLineIndent=-12,
+        spaceAfter=2,
+    )
+    return dict(title=title, subtitle=subtitle, h1=h1, body=body,
+                code=code, caption=caption, ref=ref)
 
+
+ASCII_DIAGRAM = """\
+  Input Image                        Output
+  (H x W x C)                       Scores
+       |                               ^
+  +----v---------+               +-----+-----+
+  | Conv2d+ReLU  |               | FC (cls)  |
+  | (k=3, s=1)   |               | Softmax   |
+  +--------------+               +-----------+
+       |                               ^
+  +----v---------+               +-----+-----+
+  | Conv2d+ReLU  |               | FC + ReLU |
+  | (k=3, s=1)   |               +-----------+
+  +--------------+                     ^
+       |                         +-----+-----+
+  +----v---------+               |  Flatten  |
+  | MaxPool2d    |               +-----------+
+  | (k=2, s=2)   |                     ^
+  +--------------+    ...repeat...     |
+       |_____________________________|"""
+
+PYTORCH_CODE = """\
+import torch
+import torch.nn as nn
+
+class SimpleCNN(nn.Module):
+    \"\"\"Conv2d -> ReLU -> MaxPool2d -> FC pipeline (CIFAR-10 style).\"\"\"
+    def __init__(self, num_classes: int = 10):
+        super().__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, padding=1),  # (B,32,32,32)
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2),        # (B,32,16,16)
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),  # (B,64,16,16)
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2),        # (B,64,8,8)
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(),                 # (B, 64*8*8)
+            nn.Linear(64 * 8 * 8, 256),
+            nn.ReLU(inplace=True),
+            nn.Linear(256, num_classes),  # (B, 10)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.classifier(self.features(x))
+
+# Quick smoke-test
+model = SimpleCNN(num_classes=10)
+x = torch.randn(4, 3, 32, 32)   # batch=4, RGB 32x32
+logits = model(x)                 # shape: (4, 10)
+print(logits.shape)               # -> torch.Size([4, 10])"""
+
+
+def classic_table():
+    header = ["Network", "Year", "Depth", "Params", "Top-5 Err.", "Key Innovation"]
+    data = [
+        header,
+        ["LeNet-5",    "1998", "7",   "60 K",   "—",      "First practical CNN; tanh activations"],
+        ["AlexNet",    "2012", "8",   "60 M",   "15.3%",  "ReLU, Dropout, GPU training"],
+        ["VGG-16",     "2014", "16",  "138 M",  "7.3%",   "Deep stacks of 3×3 convolutions"],
+        ["GoogLeNet",  "2014", "22",  "6.8 M",  "6.7%",   "Inception module + 1×1 bottleneck"],
+        ["ResNet-50",  "2016", "50",  "25 M",   "3.57%",  "Residual (skip) connections"],
+        ["MobileNetV2","2018", "53",  "3.4 M",  "~5%",    "Depthwise separable convolutions"],
+        ["EfficientB0","2019", "—",   "5.3 M",  "2.9%",   "Compound depth/width/res scaling"],
+    ]
+
+    available = PAGE_W - 2 * MARGIN
+    col_widths = [58, 26, 28, 34, 42, None]
+    fixed = sum(w for w in col_widths if w is not None)
+    col_widths[-1] = available - fixed
+
+    style = TableStyle([
+        ("BACKGROUND",      (0, 0), (-1, 0),  colors.HexColor("#1a1a8c")),
+        ("TEXTCOLOR",       (0, 0), (-1, 0),  colors.white),
+        ("FONTNAME",        (0, 0), (-1, 0),  "Helvetica-Bold"),
+        ("FONTSIZE",        (0, 0), (-1, -1), 7.5),
+        ("ROWBACKGROUNDS",  (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef0f8")]),
+        ("GRID",            (0, 0), (-1, -1), 0.3, colors.HexColor("#aaaaaa")),
+        ("ALIGN",           (1, 0), (4, -1),  "CENTER"),
+        ("VALIGN",          (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",      (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING",   (0, 0), (-1, -1), 3),
+        ("LEFTPADDING",     (0, 0), (-1, -1), 4),
+    ])
+    t = Table(data, colWidths=col_widths)
+    t.setStyle(style)
+    return t
+
+
+def build_story(styles):
+    s = styles
     story = []
 
+    # ---------- Header ----------
+    story.append(Paragraph("Convolutional Neural Networks: A Survey", s["title"]))
     story.append(Paragraph(
-        "Convolutional Neural Networks: A Brief Survey",
-        title_style
+        "Architecture, Code Examples, Classic Networks, and Recent Trends  ·  March 2026",
+        s["subtitle"],
     ))
+    story.append(HRFlowable(width="100%", thickness=1,
+                             color=colors.HexColor("#1a1a8c"), spaceAfter=5))
+
+    # ---------- Abstract ----------
+    story.append(Paragraph("Abstract", s["h1"]))
     story.append(Paragraph(
-        "March 2026",
-        author_style
+        "Convolutional Neural Networks (CNNs) are the backbone of modern computer vision, "
+        "achieving state-of-the-art results on image classification, detection, segmentation, "
+        "and beyond. This survey covers the core CNN data-flow (illustrated with a diagram), "
+        "provides a minimal PyTorch implementation, compares landmark architectures, and "
+        "discusses current research directions.",
+        s["body"],
     ))
 
-    story.append(Paragraph("Abstract", section_style))
+    # ---------- 1. Introduction ----------
+    story.append(Paragraph("1. Introduction", s["h1"]))
     story.append(Paragraph(
-        "Convolutional Neural Networks (CNNs) have become the cornerstone of modern computer vision, "
-        "achieving state-of-the-art results across a wide range of tasks including image classification, "
-        "object detection, and semantic segmentation. This brief survey outlines the key architectural "
-        "innovations, landmark models, and current trends in CNN research.",
-        body_style
+        "Inspired by the mammalian visual cortex, CNNs exploit local spatial correlations through "
+        "shared-weight filters, dramatically reducing parameter counts compared to fully-connected "
+        "networks while achieving translation equivariance. Since AlexNet [1] won the 2012 ImageNet "
+        "challenge by a large margin, CNNs have become foundational in computer vision, medical "
+        "imaging, autonomous driving, and natural-language processing via text-as-image "
+        "representations.",
+        s["body"],
     ))
 
-    story.append(Paragraph("1. Introduction", section_style))
+    # ---------- 2. Architecture ----------
+    story.append(Paragraph("2. Core Architecture and Data-Flow Diagram", s["h1"]))
     story.append(Paragraph(
-        "A CNN is a deep learning model that exploits the spatial structure of images through "
-        "local receptive fields and parameter sharing. The convolutional layer applies a set of "
-        "learnable filters to produce feature maps, capturing local patterns such as edges and textures. "
-        "Pooling layers then subsample these maps, providing translation invariance and reducing "
-        "computational cost. The combination of convolution, activation functions (e.g., ReLU), "
-        "and pooling enables CNNs to learn hierarchical representations from raw pixels.",
-        body_style
+        "A CNN alternates <b>convolutional</b> and <b>pooling</b> layers, followed by "
+        "<b>fully-connected (FC)</b> layers. Convolutions apply learnable filters to local "
+        "receptive fields; max-pooling halves spatial resolution at each stage; FC layers perform "
+        "final classification. Batch Normalisation and Dropout are standard regularisers.",
+        s["body"],
+    ))
+    story.append(Preformatted(ASCII_DIAGRAM, s["code"]))
+    story.append(Paragraph(
+        "Figure 1. Schematic data-flow of a typical CNN. Stacked Conv+ReLU blocks are "
+        "downsampled by MaxPool; spatial features are flattened and fed to FC classification layers.",
+        s["caption"],
     ))
 
-    story.append(Paragraph("2. Landmark Architectures", section_style))
+    # ---------- 3. PyTorch Code ----------
+    story.append(Paragraph("3. Minimal PyTorch Implementation", s["h1"]))
     story.append(Paragraph(
-        "<b>LeNet-5</b> (LeCun et al., 1998) pioneered CNNs for handwritten digit recognition. "
-        "<b>AlexNet</b> (Krizhevsky et al., 2012) demonstrated that deep CNNs trained on GPUs "
-        "dramatically outperform hand-crafted features on ImageNet. <b>VGGNet</b> (Simonyan & Zisserman, 2014) "
-        "showed that network depth, using small 3×3 filters, is a critical component. "
-        "<b>GoogLeNet/Inception</b> (Szegedy et al., 2015) introduced the Inception module for "
-        "multi-scale feature extraction with controlled parameter count. "
-        "<b>ResNet</b> (He et al., 2016) introduced residual connections, enabling training of "
-        "networks with hundreds of layers by alleviating the vanishing-gradient problem. "
-        "<b>DenseNet</b> (Huang et al., 2017) extended this idea by connecting each layer to "
-        "every subsequent layer, promoting feature reuse.",
-        body_style
+        "The snippet below shows the Conv2d → ReLU → MaxPool2d → FC pipeline "
+        "targeting CIFAR-10 (32×32 RGB, 10 classes):",
+        s["body"],
+    ))
+    story.append(Preformatted(PYTORCH_CODE, s["code"]))
+    story.append(Paragraph(
+        "The <i>features</i> module handles spatial extraction; "
+        "<i>classifier</i> maps flattened features to class logits. "
+        "Training uses cross-entropy loss with the Adam optimiser.",
+        s["body"],
     ))
 
-    story.append(Paragraph("3. Efficiency and Lightweight Models", section_style))
+    # ---------- 4. Classic Networks ----------
+    story.append(Paragraph("4. Classic Network Comparison", s["h1"]))
     story.append(Paragraph(
-        "Deploying CNNs on resource-constrained devices motivated compact architectures. "
-        "<b>MobileNet</b> (Howard et al., 2017) replaced standard convolutions with depthwise "
-        "separable convolutions, drastically reducing parameters. <b>EfficientNet</b> (Tan & Le, 2019) "
-        "proposed compound scaling of depth, width, and resolution, achieving superior accuracy–efficiency "
-        "trade-offs. Techniques such as pruning, quantization, and knowledge distillation further "
-        "compress CNNs for edge inference.",
-        body_style
+        "Table 1 traces landmark CNN milestones from LeNet-5 to EfficientNet, showing the trend "
+        "toward deeper networks, residual connections, and mobile-friendly architectures.",
+        s["body"],
+    ))
+    story.append(classic_table())
+    story.append(Spacer(1, 3))
+    story.append(Paragraph(
+        "Table 1. Landmark CNN architectures. Top-5 error on ImageNet ILSVRC (where reported).",
+        s["caption"],
     ))
 
-    story.append(Paragraph("4. Beyond Classification", section_style))
+    # ---------- 5. Recent Trends ----------
+    story.append(Paragraph("5. Recent Trends", s["h1"]))
     story.append(Paragraph(
-        "CNNs power a diverse set of vision tasks. <b>Object detection</b> frameworks such as "
-        "Faster R-CNN and YOLO combine CNN backbones with region proposal or anchor-based heads. "
-        "<b>Semantic segmentation</b> models like FCN and DeepLab use dilated convolutions and "
-        "encoder–decoder structures to produce dense pixel-wise predictions. "
-        "<b>Generative models</b>, including DCGANs, employ CNN-based generators and discriminators "
-        "for image synthesis. CNNs have also been adapted for video understanding, medical imaging, "
-        "and natural language processing tasks.",
-        body_style
+        "(a) <b>Neural Architecture Search (NAS)</b> automates topology design for given hardware "
+        "budgets (EfficientNet [6]). "
+        "(b) <b>Attention mechanisms</b> augment CNNs with channel/spatial attention (CBAM, "
+        "Non-local Networks). "
+        "(c) <b>Vision Transformers (ViT)</b> [7] replace convolutions with patch-based "
+        "self-attention, competitive on large-scale data. "
+        "(d) <b>Efficient inference</b> via quantisation, pruning, and knowledge distillation "
+        "targets edge deployment.",
+        s["body"],
     ))
 
-    story.append(Paragraph("5. Recent Trends", section_style))
+    # ---------- 6. Conclusion ----------
+    story.append(Paragraph("6. Conclusion", s["h1"]))
     story.append(Paragraph(
-        "Vision Transformers (ViT) have challenged the dominance of CNNs by modeling long-range "
-        "dependencies via self-attention. Hybrid models that integrate convolutional inductive biases "
-        "with attention mechanisms (e.g., ConvNeXt, CvT) have demonstrated competitive performance. "
-        "Self-supervised and contrastive pre-training (e.g., SimCLR, MAE) reduce dependence on "
-        "labeled data. Neural Architecture Search (NAS) automates the design of CNN topologies "
-        "tailored to specific hardware budgets.",
-        body_style
+        "CNNs have transformed computer vision, evolving from LeNet's digit recogniser to "
+        "architectures achieving superhuman performance. Hybrid CNN–Transformer models and "
+        "self-supervised pre-training continue to push accuracy–efficiency frontiers, ensuring "
+        "CNNs remain central to AI progress.",
+        s["body"],
     ))
 
-    story.append(Paragraph("6. Conclusion", section_style))
-    story.append(Paragraph(
-        "CNNs have fundamentally transformed computer vision over the past decade, evolving from "
-        "simple handcrafted filter banks to sophisticated architectures capable of superhuman "
-        "performance. Ongoing research continues to push the boundaries of efficiency, scalability, "
-        "and generalization, ensuring that CNNs and their descendants remain central to the "
-        "advancement of artificial intelligence.",
-        body_style
-    ))
-
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("References", section_style))
+    # ---------- References ----------
+    story.append(HRFlowable(width="100%", thickness=0.5,
+                             color=colors.grey, spaceBefore=5, spaceAfter=3))
+    story.append(Paragraph("References", s["h1"]))
     refs = [
-        "[1] LeCun et al. (1998). Gradient-based learning applied to document recognition. <i>Proc. IEEE</i>.",
-        "[2] Krizhevsky et al. (2012). ImageNet classification with deep CNNs. <i>NeurIPS</i>.",
-        "[3] He et al. (2016). Deep residual learning for image recognition. <i>CVPR</i>.",
-        "[4] Howard et al. (2017). MobileNets: Efficient CNNs for mobile vision applications. <i>arXiv</i>.",
-        "[5] Tan & Le (2019). EfficientNet: Rethinking model scaling for CNNs. <i>ICML</i>.",
+        "[1] Krizhevsky, A., Sutskever, I., & Hinton, G. E. (2012). ImageNet Classification with "
+        "Deep Convolutional Neural Networks. <i>NeurIPS</i>, 25.",
+        "[2] LeCun, Y., Bottou, L., Bengio, Y., & Haffner, P. (1998). Gradient-based learning "
+        "applied to document recognition. <i>Proc. IEEE</i>, 86(11), 2278–2324.",
+        "[3] Simonyan, K., & Zisserman, A. (2014). Very Deep Convolutional Networks for "
+        "Large-Scale Image Recognition. <i>arXiv:1409.1556</i>.",
+        "[4] He, K., Zhang, X., Ren, S., & Sun, J. (2016). Deep Residual Learning for Image "
+        "Recognition. <i>CVPR</i>, 770–778.",
+        "[5] Szegedy, C., et al. (2015). Going Deeper with Convolutions. <i>CVPR</i>, 1–9.",
+        "[6] Tan, M., & Le, Q. V. (2019). EfficientNet: Rethinking Model Scaling for CNNs. "
+        "<i>ICML</i>, 6105–6114.",
+        "[7] Dosovitskiy, A., et al. (2020). An Image is Worth 16×16 Words: Transformers for "
+        "Image Recognition at Scale. <i>arXiv:2010.11929</i>.",
     ]
-    ref_style = ParagraphStyle(
-        'Ref', parent=body_style, fontSize=9, leading=12, spaceAfter=2
-    )
     for r in refs:
-        story.append(Paragraph(r, ref_style))
+        story.append(Paragraph(r, s["ref"]))
 
+    return story
+
+
+def build_pdf(filename: str = "cnn_survey.pdf") -> None:
+    doc = SimpleDocTemplate(
+        filename,
+        pagesize=A4,
+        leftMargin=MARGIN,
+        rightMargin=MARGIN,
+        topMargin=MARGIN,
+        bottomMargin=MARGIN,
+        title="CNN Survey",
+        author="Survey Generator",
+    )
+    story = build_story(build_styles())
     doc.build(story)
     print(f"PDF written to {filename}")
 
-if __name__ == '__main__':
-    build_pdf('cnn_survey.pdf')
+
+if __name__ == "__main__":
+    build_pdf("cnn_survey.pdf")
